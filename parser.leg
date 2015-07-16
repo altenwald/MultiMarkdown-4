@@ -4,7 +4,7 @@
 	parser.leg -> parser.c -- Parse (Multi)Markdown plain text for
 		conversion into other formats
 	
-	(c) 2013 Fletcher T. Penney (http://fletcherpenney.net/).
+	(c) 2013-2015 Fletcher T. Penney (http://fletcherpenney.net/).
 
 	Derived from peg-multimarkdown, which was forked from peg-markdown,
 	which is (c) 2008 John MacFarlane (jgm at berkeley dot edu), and 
@@ -59,10 +59,14 @@ Doc =  BOM? a:StartList b:StartList
 			((parser_data *)G->data)->result = reverse_list(a);
 		}
 
-MetaData = a:StartList (YAMLStart)? !([A-Za-z]+ "://") !SetextHeading
+MetaData = a:StartList
+		((
+			(YAMLStart) |
+			!([A-Za-z]+ "://") !SetextHeading
+		)
 		(MetaDataKeyValue { a = cons($$, a); })+
+		(YAMLStop)?)
 		{ $$ = list(METADATA, a); }
-		(YAMLStop)?
 
 MetaDataKeyValue = a:MetaDataKey Sp ':' Sp b:MetaDataValue
 	{
@@ -89,12 +93,12 @@ MetaDataValue = a:StartList
 			$$->key = METAVALUE;
 		}
 
-YAMLStart = "---" Sp BlankLine
+YAMLStart = "---" BlankLine
 
-YAMLStop = ("---"|"...") Sp BlankLine
+YAMLStop = ("---"|"...") BlankLine
 
 DocForMetaDataOnly = BOM? a:StartList
-		( &( MetaDataKey Sp ':' Sp (!Newline)) MetaData
+		( &( YAMLStart? MetaDataKey Sp ':' Sp (!Newline)) MetaData
 			{ a = cons($$, a); } )?
 		( SkipBlock )*
 		BlankLine*
@@ -126,6 +130,7 @@ Block =	BlankLine*
 		| StyleBlock
 		| &{ !ext(EXT_COMPATIBILITY) } Table
 		| &{ !ext(EXT_COMPATIBILITY) } ImageBlock
+		| &{ !ext(EXT_COMPATIBILITY) } TOC
 		| !(Sp HtmlBlockInTags) Para
 		| Plain )
 
@@ -146,8 +151,16 @@ HeadingSectionBlock = BlankLine* !Heading
 		| StyleBlock
 		| &{ !ext(EXT_COMPATIBILITY) } Table
 		| &{ !ext(EXT_COMPATIBILITY) } ImageBlock
+		| &{ !ext(EXT_COMPATIBILITY) } TOC
 		| !(Sp HtmlBlockInTags) Para
 		| Plain )
+
+TOC = "{{TOC}}" Sp Newline
+	{
+		$$ = mk_node(TOC);
+		$$->children = mk_node(RAW);
+		$$->children->str = markdown_to_string(((parser_data *)G->data)->original, 0, TOC_FORMAT);
+	}
 
 Heading = SetextHeading | AtxHeading
 
@@ -213,13 +226,13 @@ Spnl =          Sp (Newline Sp)?
 Spacechar =		' ' | '\t'
 Nonspacechar =  !Spacechar !Newline .
 NormalChar =	!( SpecialChar | Spacechar | Newline ) .
-SpecialChar =   '*' | '_' | '`' | '&' | '[' | ']' | '(' | ')' | '<' | '!' | '#' | '\\' | '\'' | '"' | '?' | ',' | ';' | '/' | '.' | ExtendedSpecialChar
+SpecialChar =   '*' | '_' | '`' | '&' | '[' | ']' | '(' | ')' | '<' | '!' | '#' | '\\' | '\'' | '"' | '?' | ',' | ';' | '/' | '.' | '。' | '、'| ExtendedSpecialChar
 ExtendedSpecialChar = &{ ext(EXT_SMART) } ('.' | '-' | '\'' | '"')
 		| &{ ext(EXT_NOTES) } ( '^' )
 		| &{ ext(EXT_CRITIC) } ( '{' )
 		| &{ !ext(EXT_COMPATIBILITY) } ( '~' )
 		| &{ !ext(EXT_COMPATIBILITY) } ( '|' )
-Punctuation = '.' | ',' | '?' | '!' | ';' | ':'
+Punctuation = '.' | ',' | '?' | '!' | ';' | ':' | '。' | '、'
 NonPunctuation = !(Punctuation | SpecialChar | Spacechar | Newline) .
 
 Quoted =        '"' (!'"' .)* '"' | '\'' (!'\'' .)* '\''
@@ -343,11 +356,11 @@ voidNormalEndline = Sp Newline !BlankLine !'>' !AtxStart
 		!(RawLine ('='+ | '-'+) Newline)
 
 Str = 	a:StartList < NormalChar+ > { a = cons(str(yytext), a); }
-		( StrChunk { a = cons($$, a); } )*
+		( &{ !ext(EXT_COMPATIBILITY) }  StrChunk { a = cons($$, a); } )*
 		( &{ !ext(EXT_COMPATIBILITY) } ( Superscript | Subscript) {a = cons($$, a); } )*
 		{ if (a->next == NULL) { $$ = a; } else { $$ = list(LIST, a); } }
 
-StrChunk = < (NormalChar | '_'+ &Alphanumeric)+ > { $$ = str(yytext); } |
+StrChunk = < (NormalChar | '_'+ !Punctuation &Alphanumeric)+ > { $$ = str(yytext); } |
 	AposChunk
 
 AposChunk = &{ ext(EXT_SMART) } '\'' &Alphanumeric
@@ -419,7 +432,7 @@ Strong = StrongStar | StrongUl
 
 StrongStar = "**" !Whitespace
 		a:StartList
-		( !"**" b:Inline { a = cons(b, a); })+
+		( !"**" b:Inline { a = cons(b, a); })+ 
 		<"**">
 		{ $$ = list(STRONG, a); }
 
@@ -440,13 +453,15 @@ StrongAndEmphStar = "***" !Whitespace
 			$$ = list(STRONG, $$);
 		}
 
-EmphAndStrongStar = "*" &("**")
+EmphAndStrongStar = "*" &(PossibleEmphStrongStar)
 		a:StartList 
 		( !('*' !'*') b:InlineNoEmph { a = cons(b, a); })+
 		<"*">
 		{
-			$$ = list(EMPH, a); 
+			$$ = list(EMPH, a);
 		}
+
+PossibleEmphStrongStar = "**" (!'\n' !'*' .)+ "**" (!'\n' !'*' .)+ '*'
 
 StrongAndEmphUl = "___" !Whitespace
 		a:StartList
@@ -457,13 +472,15 @@ StrongAndEmphUl = "___" !Whitespace
 			$$ = list(STRONG, $$);
 		}
 
-EmphAndStrongUl = "_" &("__")
+EmphAndStrongUl = "_" &(PossibleEmphStrongUl)
 		a:StartList 
 		( !('_' !'_') b:InlineNoEmph { a = cons(b, a); })+
 		<"_">
 		{
 			$$ = list(EMPH, a); 
 		}
+
+PossibleEmphStrongUl = "__" (!'\n' !'_' .)+ "__" (!'\n' !'_' .)+ '_'
 
 Link = ExplicitLink | ReferenceLink | AutoLink
 
@@ -652,7 +669,7 @@ Label = < "[" !'[' ( !'^' !'#' &{ ext(EXT_NOTES) } | &. &{ !ext(EXT_NOTES) } )
 			']'>
 	{ $$ = list(LIST, a); }
 
-AutoLabel = '[' < (!Newline !'^' !'#' !'%' . )( !Newline !']' . )+ > ']' &(!(Sp ('(' | '[')))
+AutoLabel = '[' < (!Newline !'^' !'#' !'%' . )( !Newline !']' !'[' . )+ > ']' &(!(Sp ('(' | '[')))
 {
 	node *ref;
 	$$ = str(yytext);
@@ -750,7 +767,7 @@ Fenced = NonindentSpace (( Ticks3 a:FenceType < ( (!(NonindentSpace Ticks3) NonM
 
 
 Smart = &{ ext(EXT_SMART) }
-        ( Ellipsis | Dash | SingleQuoted | DoubleQuoted | Apostrophe )
+        ( Ellipsis | Dash | SingleQuoted | DoubleQuoted | BackTickQuoted | Apostrophe )
 
 Apostrophe = <'\''>
 		{ $$ = str(yytext); $$->key = APOSTROPHE; }
@@ -773,7 +790,7 @@ SingleQuoteEnd = '\'' !Alphanumeric
 
 SingleQuoted = SingleQuoteStart
 		a:StartList
-		( !SingleQuoteEnd b:Inline { a = cons(b, a); } )+
+		( !SingleQuoteEnd b:Inline { a = cons(b, a); } )*
 		SingleQuoteEnd
 		{ $$ = mk_list(SINGLEQUOTED, a); }
 
@@ -783,10 +800,19 @@ DoubleQuoteEnd = '"'
 
 DoubleQuoted =  DoubleQuoteStart
 		a:StartList
-		( !DoubleQuoteEnd b:Inline { a = cons(b, a); } )+
+		( !DoubleQuoteEnd !BackTickEnd !BackTickStart b:Inline { a = cons(b, a); } )*
 		DoubleQuoteEnd
 		{ $$ = mk_list(DOUBLEQUOTED, a); }
 
+BackTickStart = '``'
+
+BackTickEnd = '\'\''
+
+BackTickQuoted =  BackTickStart
+		a:StartList
+		( !DoubleQuoteEnd !BackTickEnd b:Inline { a = cons(b, a); } )*
+		BackTickEnd
+		{ $$ = mk_list(DOUBLEQUOTED, a); }
 
 NonblankIndentedLine = !BlankLine IndentedLine
 
@@ -862,9 +888,8 @@ ListLoose = a:StartList
 
 ListItem = < ( Bullet | Enumerator | BulletNoSpace &EmptyList | EnumeratorNoSpace &EmptyList )>
 		a:StartList
-		( EmptyList { a = cons($$, a); } |
 		( ListBlock { a = cons($$, a); }
-		( ListContinuationBlock { a = cons($$, a); } )* ))
+		( ListContinuationBlock { a = cons($$, a); } )* )
 		{
 			node *raw;
 			raw = mk_str_from_list(a, false);
@@ -875,11 +900,10 @@ ListItem = < ( Bullet | Enumerator | BulletNoSpace &EmptyList | EnumeratorNoSpac
 
 ListItemTight = ( Bullet | Enumerator | BulletNoSpace &EmptyList | EnumeratorNoSpace &EmptyList )
 		a:StartList
-		( EmptyList { a = cons($$, a); } |
 		( ListBlock { a = cons($$, a); }
 		( !BlankLine
 		ListContinuationBlock { a = cons($$, a); } )*
-		!ListContinuationBlock))
+		!ListContinuationBlock)
 		{
 			node *raw;
 			raw = mk_str_from_list(a, false);
@@ -892,7 +916,7 @@ EmptyList = BlankLine
 		{ $$ = mk_str(""); }
 
 ListBlock = a:StartList
-		!BlankLine Line { a = cons($$, a); }
+		( EmptyList | !Heading Line ) { a = cons($$, a); }
 		( ListBlockLine { a = cons($$, a); } )*
 		{ $$ = mk_str_from_list(a, false); }
 
@@ -904,7 +928,7 @@ ListContinuationBlock = a:StartList
 			else
 				a = cons(str(yytext), a);
 		} )
-		( Indent ListBlock { a = cons($$, a); } )+
+		( Indent !BlankLine ListBlock { a = cons($$, a); } )+
 		{  $$ = mk_str_from_list(a, false); }
 
 Enumerator = NonindentSpace [0-9]+ '.' Spacechar+
@@ -915,6 +939,7 @@ OrderedList = &Enumerator (ListTight | ListLoose)
 		{ $$->key = ORDEREDLIST; }
 
 ListBlockLine = !BlankLine
+		!Heading
 		!( Indent? (Bullet | Enumerator | BulletNoSpace &EmptyList | EnumeratorNoSpace &EmptyList ) )
 		!HorizontalRule
 		OptionallyIndentedLine
@@ -1233,8 +1258,8 @@ Table = a:StartList b:StartList (TableCaption { b = cons($$, b);})?
 				append_list($$,a); } )
 		(TableBody { a = cons($$, a);} )
 		(BlankLine !TableCaption TableBody { a = cons($$, a); }
-		&(TableCaption | BlankLine) )*
-		( (TableCaption { b = cons($$, b);} &BlankLine) | &BlankLine)
+		&(TableCaption | BlankLine | Heading) )*
+		( (TableCaption { b = cons($$, b);} &BlankLine) | &BlankLine | &Heading)
 		# Requires blank line to end table "block"
 		{
 			if (b != NULL) { append_list(b,a); };
@@ -1305,11 +1330,14 @@ RightAlign = ('-'+ | '='+)':' &(!'-' !'=' !':')
 
 CellDivider = '|'
 
-TableCaption = b:StartList a:Label
+BracketedText = ((!'[' !']' .) | '[' BracketedText ']' )*	# Matches text within [...], but allows for recursive brackets
+
+TableCaption = b:StartList a:StartList ('[' < BracketedText > ']' {a = markdown_chunk_to_node(yytext, ((parser_data *)G->data)->extensions);} )
 		( c:AutoLabel { b = c; b->key = TABLELABEL;})? Sp Newline
 		{
 			$$ = a;
 			$$->key = TABLECAPTION;
+
 			if ( (b != NULL) && (b->key == TABLELABEL) ) {
 				b->next = $$->children;
 				$$->children = b;
@@ -1376,6 +1404,23 @@ OPMLSectionBlock = BlankLine* !OPMLHeading OPMLPlain
 
 OPMLPlain = a:StartList (!BlankLine !Heading Line { a = cons($$,a); })+
 		{ $$ = mk_list(PLAIN, a); }
+
+DocForTOC = BOM? a: StartList
+		(&( (YAMLStart)? MetaDataKey Sp ':' Sp (!Newline)) z:MetaData { free_node_tree(z); } )?
+		( TOCBlock { a = cons($$, a); } | TOCPlain)*
+		BlankLine*
+		{ ((parser_data *)G->data)->result = reverse_list(a); }
+
+TOCBlock = BlankLine* TOCHeadingSection
+
+TOCHeadingSection = a:StartList Heading { a = cons($$, a); }
+	(TOCSectionBlock )*
+	{ $$ = mk_list(HEADINGSECTION, a); }
+
+TOCSectionBlock = BlankLine* !Heading TOCPlain
+
+TOCPlain = ( (y:Fenced { free_node_tree(y); } ) | (!BlankLine !Heading z:Line { free_node_tree(z); }) )+
+
 
 # Critic Markup
 
@@ -1470,7 +1515,34 @@ node * process_raw_blocks(node * n, unsigned long extensions) {
 	return n;
 }
 
-char * markdown_to_string(char * source, unsigned long extensions, int format) {
+node * markdown_chunk_to_node(const char * source, unsigned long extensions) {
+	/* 
+		Designed for parsing 'chunks' of markdown from inside a specific range,
+		e.g. a label from '[' ... ']' that can have various markup inside
+
+		Prevents situations where the parser gets greedy and goes beyond the 
+		intended boundaries.
+	*/
+
+	GREG g;
+	yyinit(&g);
+	node * result;
+
+	g.data = mk_parser_data(source, extensions);
+
+	while (yyparse(&g));
+
+	result = process_raw_blocks(((parser_data *)g.data)->result, extensions);
+
+	((parser_data *)g.data)->result = NULL;
+
+	free_parser_data((parser_data *)g.data);
+	yydeinit(&g);
+
+	return result;
+}
+
+char * markdown_to_string(const char * source, unsigned long extensions, int format) {
 	char *out;
 	char *formatted;
 	char *critic_resolved;
@@ -1520,6 +1592,8 @@ char * markdown_to_string(char * source, unsigned long extensions, int format) {
 	
 	if (format == OPML_FORMAT) {
 		while (yyparse_from(&g, yy_DocForOPML));	/* We want simpler version */
+	} else if (format == TOC_FORMAT) {
+		while (yyparse_from(&g, yy_DocForTOC));		/* We want simpler version */
 	} else {
 		while (yyparse(&g));       /* parse */
 	}
@@ -1558,7 +1632,7 @@ char * markdown_to_string(char * source, unsigned long extensions, int format) {
 }
 
 /* has_metadata -- determine whether metadata exists or not */
-bool has_metadata(char *source, unsigned long extensions) {
+bool has_metadata(const char *source, unsigned long extensions) {
 	char *formatted;
 	GREG g;
 	yyinit(&g);
@@ -1584,7 +1658,7 @@ bool has_metadata(char *source, unsigned long extensions) {
 }
 
 /* extract_metadata_keys -- return list of metadata keys as "\n" separated list */
-char * extract_metadata_keys(char *source, unsigned long extensions) {
+char * extract_metadata_keys(const char *source, unsigned long extensions) {
 	char *out;
 	char *formatted;
 	GREG g;
@@ -1610,7 +1684,7 @@ char * extract_metadata_keys(char *source, unsigned long extensions) {
 }
 
 /* extract_metadata_value -- find the value and return it */
-char * extract_metadata_value(char *source, unsigned long extensions, char *key) {
+char * extract_metadata_value(const char *source, unsigned long extensions, char *key) {
 	char *out;
 	char *formatted;
 	GREG g;

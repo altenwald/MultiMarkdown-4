@@ -2,7 +2,7 @@
 
 	parse_utilities.c -- miscellaneous support functions
 
-	(c) 2013 Fletcher T. Penney (http://fletcherpenney.net/).
+	(c) 2013-2015 Fletcher T. Penney (http://fletcherpenney.net/).
 
 	Derived from peg-multimarkdown, which was forked from peg-markdown,
 	which is (c) 2008 John MacFarlane (jgm at berkeley dot edu), and 
@@ -223,7 +223,7 @@ void append_list(node *new, node *list) {
 
 /* Create parser data - this is where you stash stuff to communicate 
 	into and out of the parser */
-parser_data * mk_parser_data(char *charbuf, unsigned long extensions) {
+parser_data * mk_parser_data(const char *charbuf, unsigned long extensions) {
 	clock_t start = clock();
 
 	parser_data *result = (parser_data *)malloc(sizeof(parser_data));
@@ -276,6 +276,7 @@ scratch_pad * mk_scratch_pad(unsigned long extensions) {
 	result->cell_type = 0;
 	result->table_alignment = NULL;
 	result->table_column = 0;
+	result->inside_footnote = 0;
 
 	if (extensions & EXT_RANDOM_FOOT) {
 	    srand((int)time(NULL));
@@ -608,7 +609,7 @@ void print_raw_node_tree(GString *out, node *n) {
 
 /* preformat_text - allocate and copy text buffer while
  * performing tab expansion. */
-char * preformat_text(char *text) {
+char * preformat_text(const char *text) {
 	GString *buf;
 	char next_char;
 	int charstotab;
@@ -817,10 +818,18 @@ char * mmd_version(void) {
 }
 
 void debug_node(node *n) {
+	if (n != NULL) {
+		fprintf(stderr, "node (%d) '%s'\n",n->key, n->str);
+		if (n->children != NULL)
+			debug_node_tree(n->children);
+	}
+}
+
+void debug_node_tree(node *n) {
 	while (n != NULL) {
 		fprintf(stderr, "node (%d) '%s'\n",n->key, n->str);
 		if (n->children != NULL)
-			debug_node(n->children);
+			debug_node_tree(n->children);
 		n = n->next;
 	}
 }
@@ -858,4 +867,19 @@ node * copy_node_tree(node *n) {
 	
 		return m;
 	}
+}
+
+char * my_strndup(const char * source, size_t n) {
+	size_t len = strlen(source);
+	char * result;
+
+	if (n < len)
+		len = n;
+
+	result = malloc(len + 1);
+
+	memcpy(result, source, len);
+	result[len] = '\0';
+
+	return result;
 }

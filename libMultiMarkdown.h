@@ -2,7 +2,7 @@
 
 	libMultiMarkdown.h -- MultiMarkdown library header
 
-	(c) 2013 Fletcher T. Penney (http://fletcherpenney.net/).
+	(c) 2013-2015 Fletcher T. Penney (http://fletcherpenney.net/).
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License or the MIT
@@ -19,10 +19,10 @@
 
 /* Main API commands */
 
-char * markdown_to_string(char * source, unsigned long extensions, int format);
-bool   has_metadata(char *source, unsigned long extensions);
-char * extract_metadata_keys(char *source, unsigned long extensions);
-char * extract_metadata_value(char *source, unsigned long extensions, char *key);
+char * markdown_to_string(const char * source, unsigned long extensions, int format);
+bool   has_metadata(const char *source, unsigned long extensions);
+char * extract_metadata_keys(const char *source, unsigned long extensions);
+char * extract_metadata_value(const char *source, unsigned long extensions, char *key);
 char * mmd_version(void);
 
 
@@ -51,19 +51,20 @@ enum parser_extensions {
 
 /* Define output formats we support -- first in list is default */
 enum export_formats {
+	ORIGINAL_FORMAT,                /* Transclusion happens, but no parsing */
 	HTML_FORMAT,
-	TEXT_FORMAT,
+	TEXT_FORMAT,                    /* Not currently used */
 	LATEX_FORMAT,
 	MEMOIR_FORMAT,
 	BEAMER_FORMAT,
 	OPML_FORMAT,
 	ODF_FORMAT,
 	RTF_FORMAT,
-	ORIGINAL_FORMAT,                 /* Not currently used */
 	CRITIC_ACCEPT_FORMAT,
 	CRITIC_REJECT_FORMAT,
 	CRITIC_HTML_HIGHLIGHT_FORMAT,
 	LYX_FORMAT,
+	TOC_FORMAT,
 };
 
 /* These are the identifiers for node types */
@@ -148,6 +149,7 @@ enum keys {
 	ABBR,
 	ABBRSTART,
 	ABBRSTOP,
+	TOC,
 	KEY_COUNTER                      /* This *MUST* be the last item in the list */
 };
 
