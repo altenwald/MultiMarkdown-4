@@ -751,7 +751,7 @@ void print_html_node(GString *out, node *n, scratch_pad *scratch) {
 			break;
 		case TABLE:
 			pad(out,2, scratch);
-			g_string_append_printf(out, "<table>\n");
+			g_string_append_printf(out, "<table class='table'>\n");
 			print_html_node_tree(out, n->children, scratch);
 			g_string_append_printf(out, "</table>\n");
 			scratch->cell_type = 0;
